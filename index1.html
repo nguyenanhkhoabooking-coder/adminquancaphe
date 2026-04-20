@@ -1,0 +1,269 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Cát Tường Coffee - Thu Ngân & QR Bill</title>
+    <link href="https://fonts.googleapis.com/css2?family=Special+Elite&family=Inter:wght@400;600;700&family=Oswald:wght@400;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+    
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.1.3/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.1.3/firebase-database-compat.js"></script>
+
+    <style>
+        :root { 
+            --cong-green: #3a4d39; --cong-dark: #2a3829; --cong-red: #b22222;
+            --bg-beige: #f4f1ea; --sidebar-width: 260px; 
+        }
+        * { box-sizing: border-box; }
+        body { font-family: 'Inter', sans-serif; background-color: var(--bg-beige); display: flex; margin: 0; min-height: 100vh; }
+        
+        /* Đăng nhập */
+        #login-overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: var(--cong-dark); display: flex; justify-content: center; align-items: center; z-index: 9999; }
+        .login-box { background: white; padding: 40px; border-radius: 15px; text-align: center; width: 350px; }
+        .login-box input { width: 100%; padding: 15px; margin-bottom: 20px; border: 1px solid #ddd; border-radius: 8px; }
+        .login-box button { width: 100%; padding: 15px; background: var(--cong-green); color: white; border: none; border-radius: 8px; cursor: pointer; font-weight: bold; }
+
+        /* Sidebar */
+        .sidebar { width: var(--sidebar-width); background: var(--cong-dark); height: 100vh; position: fixed; color: white; padding: 25px 15px; z-index: 100; }
+        .sidebar-brand { font-family: 'Special Elite'; font-size: 1.6rem; text-align: center; margin-bottom: 30px; color: #e9e4d7; border-bottom: 1px solid #444; padding-bottom: 15px; }
+        .nav-item { padding: 15px; cursor: pointer; display: flex; align-items: center; gap: 12px; border-radius: 8px; font-family: 'Oswald'; text-transform: uppercase; transition: 0.3s; }
+        .nav-item:hover { background: var(--cong-green); }
+
+        /* Content */
+        .main-content { margin-left: var(--sidebar-width); flex-grow: 1; padding: 40px; display: none; }
+        .header-flex { display: flex; justify-content: space-between; align-items: center; margin-bottom: 35px; }
+        .stats-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 25px; margin-bottom: 35px; }
+        .stat-card { background: white; padding: 25px; border-radius: 12px; border-left: 6px solid var(--cong-green); box-shadow: 0 4px 6px rgba(0,0,0,0.05); }
+        .stat-card .value { font-size: 2.2rem; font-weight: 700; color: var(--cong-dark); font-family: 'Oswald'; }
+        
+        .content-box { background: white; padding: 30px; border-radius: 12px; box-shadow: 0 4px 10px rgba(0,0,0,0.05); margin-bottom: 40px; }
+        .content-box h2 { font-family: 'Special Elite'; margin-top: 0; display: flex; align-items: center; gap: 10px; }
+
+        table { width: 100%; border-collapse: collapse; }
+        th { background: #f8f9fa; padding: 15px; text-align: left; font-family: 'Oswald'; border-bottom: 2px solid #eee; }
+        td { padding: 15px; border-bottom: 1px solid #eee; vertical-align: top; }
+        
+        .items-list { background: #f9f7f2; padding: 10px; border-radius: 6px; border-left: 3px solid var(--cong-green); font-size: 0.9rem; line-height: 1.6; }
+
+        .btn { padding: 10px 18px; border: none; border-radius: 6px; cursor: pointer; font-weight: 600; font-family: 'Oswald'; }
+        .btn-pay { background: #28a745; color: white; width: 100%; }
+        .btn-cancel { background: #dc3545; color: white; margin-top: 5px; width: 100%; font-size: 0.8rem; padding: 5px; }
+        .btn-export { background: var(--cong-green); color: white; display: flex; align-items: center; gap: 8px; }
+
+        .badge { padding: 5px 12px; border-radius: 20px; font-size: 0.75rem; font-weight: 700; }
+        .badge-paid { background: #e8f5e9; color: #2e7d32; }
+        .badge-void { background: #ffebee; color: #c62828; }
+
+        /* CSS In Hóa Đơn */
+        #invoice-print { display: none; }
+        @media print {
+            body * { visibility: hidden; }
+            #invoice-print, #invoice-print * { visibility: visible; }
+            #invoice-print { display: block !important; position: absolute; left: 0; top: 0; width: 80mm; padding: 5mm; background: white; color: black; }
+            .no-print { display: none; }
+            .qr-code-area { text-align: center; margin-top: 15px; border-top: 1px dashed #ccc; padding-top: 10px; }
+            .qr-code-area img { width: 130px; height: 130px; }
+        }
+    </style>
+</head>
+<body>
+
+    <div id="login-overlay">
+        <div class="login-box">
+            <h2>CÁT TƯỜNG ADMIN</h2>
+            <input type="password" id="admin-password" placeholder="Mật khẩu quản trị">
+            <button onclick="checkLogin()">ĐĂNG NHẬP</button>
+        </div>
+    </div>
+
+    <aside class="sidebar no-print">
+        <div class="sidebar-brand">CÁT TƯỜNG</div>
+        <div class="nav-item" onclick="window.scrollTo(0,0)"><i class="fas fa-home"></i> Tổng quan</div>
+        <div class="nav-item" onclick="document.getElementById('sec-pending').scrollIntoView()"><i class="fas fa-cash-register"></i> Đơn Chờ</div>
+        <div class="nav-item" onclick="document.getElementById('sec-history').scrollIntoView()"><i class="fas fa-history"></i> Lịch sử</div>
+    </aside>
+
+    <main class="main-content no-print" id="admin-main">
+        <div class="header-flex">
+            <h1 style="font-family: 'Special Elite'; color: var(--cong-dark);">Quản Lý Thu Ngân</h1>
+            <button class="btn btn-export" onclick="exportExcel()"><i class="fas fa-file-excel"></i> XUẤT EXCEL</button>
+        </div>
+        
+        <div class="stats-grid">
+            <div class="stat-card"><h3>Doanh thu ngày</h3><div class="value" id="total-revenue">0đ</div></div>
+            <div class="stat-card"><h3>Đơn hoàn thành</h3><div class="value" id="total-orders">0</div></div>
+        </div>
+
+        <div class="content-box" id="sec-pending">
+            <h2 style="color: var(--cong-red);"><i class="fas fa-clock"></i> ĐƠN CHỜ THANH TOÁN</h2>
+            <table>
+                <thead><tr><th>Khách / Bàn</th><th>Món chi tiết</th><th>Tổng tiền</th><th style="width:150px">Thao tác</th></tr></thead>
+                <tbody id="list-pending"></tbody>
+            </table>
+        </div>
+
+        <div class="content-box" id="sec-history">
+            <h2 style="color: var(--cong-green);"><i class="fas fa-check-double"></i> LỊCH SỬ GIAO DỊCH</h2>
+            <table>
+                <thead><tr><th>Thời gian</th><th>Khách hàng</th><th>Món</th><th>Số tiền</th><th>Trạng thái</th></tr></thead>
+                <tbody id="list-history"></tbody>
+            </table>
+        </div>
+    </main>
+
+    <div id="invoice-print">
+        <div style="text-align: center; border-bottom: 1px dashed #000; padding-bottom: 10px; margin-bottom: 10px;">
+            <h2 style="margin:0">CÁT TƯỜNG COFFEE</h2>
+            <p style="font-size: 0.8rem; margin: 5px 0;">HÓA ĐƠN THANH TOÁN</p>
+        </div>
+        <div id="print-info" style="font-size: 0.85rem; margin-bottom: 10px;"></div>
+        <table style="width: 100%; border-bottom: 1px dashed #000; font-size: 0.85rem; margin-bottom: 10px;">
+            <thead><tr><th style="text-align:left">Món</th><th style="text-align:right">Tiền</th></tr></thead>
+            <tbody id="print-items"></tbody>
+        </table>
+        <div style="text-align: right; font-weight: bold; font-size: 1.2rem;" id="print-total"></div>
+        
+        <div class="qr-code-area">
+            <p style="font-size: 0.7rem; margin: 0 0 5px 0;">Quét mã để chuyển khoản</p>
+            <div id="qr-image-bill"></div>
+            <p style="font-size: 0.65rem; margin-top: 5px;" id="qr-footer-text"></p>
+        </div>
+
+        <p style="text-align: center; font-size: 0.75rem; margin-top: 15px;">Cảm ơn quý khách!</p>
+    </div>
+
+    <script>
+        
+        const BANK_INFO = {
+            ID: "Techcombank",      
+            STK: "123456789",    
+            NAME: "CatTuongCoffe" 
+        };
+
+        function checkLogin() {
+            if (document.getElementById('admin-password').value === "cattuong") {
+                document.getElementById('login-overlay').style.display = 'none';
+                document.getElementById('admin-main').style.display = 'block';
+                initFirebase();
+            } else { alert("Sai mật khẩu!"); }
+        }
+
+        function initFirebase() {
+            const firebaseConfig = {
+                apiKey: "AIzaSyBsP5Xr4syz3VPSS0OKUtSHq07cOkiF68Y",
+                authDomain: "duanbancaphe-85d26.firebaseapp.com",
+                databaseURL: "https://duanbancaphe-85d26-default-rtdb.firebaseio.com",
+                projectId: "duanbancaphe-85d26",
+                storageBucket: "duanbancaphe-85d26.firebasestorage.app",
+                messagingSenderId: "100886910992",
+                appId: "1:100886910992:web:94f9dcaf30edaf51f45295"
+            };
+            if (!firebase.apps.length) firebase.initializeApp(firebaseConfig);
+            const db = firebase.database();
+            const today = new Date().toLocaleDateString('vi-VN');
+
+            db.ref('orders').on('value', (snapshot) => {
+                const orders = [];
+                snapshot.forEach(child => { orders.push({ id: child.key, ...child.val() }); });
+                
+                const todayDone = orders.filter(o => o.date === today && o.status === 'Đã thanh toán');
+                document.getElementById('total-revenue').innerText = todayDone.reduce((s, o) => s + (Number(o.total) || 0), 0).toLocaleString() + 'đ';
+                document.getElementById('total-orders').innerText = todayDone.length;
+
+                renderData(orders);
+            });
+        }
+
+        function renderData(orders) {
+            const pendingBody = document.getElementById('list-pending');
+            const historyBody = document.getElementById('list-history');
+            const sorted = [...orders].reverse();
+
+            const pending = sorted.filter(o => !o.status || o.status === 'Mới');
+            pendingBody.innerHTML = pending.map(o => `
+                <tr>
+                    <td><strong>${o.customer}</strong><br><small>${o.location}</small></td>
+                    <td><div class="items-list">${formatItems(o.items)}</div></td>
+                    <td style="font-weight:700; color:var(--cong-red)">${Number(o.total).toLocaleString()}đ</td>
+                    <td>
+                        <button class="btn btn-pay" onclick="payAndPrint('${o.id}')"><i class="fas fa-print"></i> THANH TOÁN</button>
+                        <button class="btn btn-cancel" onclick="updateStatus('${o.id}', 'Hủy')">HỦY ĐƠN</button>
+                    </td>
+                </tr>
+            `).join('') || '<tr><td colspan="4" style="text-align:center; padding:30px;">Hết đơn chờ.</td></tr>';
+
+            const history = sorted.filter(o => o.status === 'Đã thanh toán' || o.status === 'Hủy');
+            historyBody.innerHTML = history.map(o => `
+                <tr>
+                    <td><small>${o.date}</small><br>${o.time}</td>
+                    <td><strong>${o.customer}</strong></td>
+                    <td><small>${formatItems(o.items)}</small></td>
+                    <td style="font-weight:700">${Number(o.total).toLocaleString()}đ</td>
+                    <td><span class="badge ${o.status==='Đã thanh toán'?'badge-paid':'badge-void'}">${o.status}</span></td>
+                </tr>
+            `).join('');
+        }
+
+        function formatItems(items) {
+            if (!items) return "Không có món";
+            const list = Array.isArray(items) ? items : items.split(',');
+            return list.map((item, i) => `${i + 1}. ${item.trim()}`).join('<br>');
+        }
+
+        function payAndPrint(id) {
+            firebase.database().ref('orders/' + id).once('value', s => {
+                const o = s.val();
+                
+                // 1. Đổ dữ liệu text vào Bill
+                document.getElementById('print-info').innerHTML = `
+                    <b>Khách:</b> ${o.customer}<br>
+                    <b>Bàn:</b> ${o.location}<br>
+                    <b>Ngày:</b> ${o.date} ${o.time}
+                `;
+                
+                const items = Array.isArray(o.items) ? o.items : o.items.split(',');
+                document.getElementById('print-items').innerHTML = items.map(item => `
+                    <tr><td style="padding:4px 0">${item.trim()}</td><td style="text-align:right">-</td></tr>
+                `).join('');
+                
+                document.getElementById('print-total').innerText = "TỔNG: " + Number(o.total).toLocaleString() + "đ";
+
+                // 2. TẠO MÃ QR (VietQR API)
+                const amount = o.total;
+                const description = encodeURIComponent(`Thanh toan bill ${o.customer}`);
+                const qrUrl = `https://img.vietqr.io/image/${BANK_INFO.ID}-${BANK_INFO.STK}-compact2.png?amount=${amount}&addInfo=${description}&accountName=${encodeURIComponent(BANK_INFO.NAME)}`;
+                
+                document.getElementById('qr-image-bill').innerHTML = `<img src="${qrUrl}">`;
+                document.getElementById('qr-footer-text').innerText = `${BANK_INFO.NAME} - ${BANK_INFO.STK}`;
+
+                // 3. Đợi ảnh QR tải xong rồi mới In
+                setTimeout(() => {
+                    window.print();
+                    firebase.database().ref('orders/' + id).update({ status: 'Đã thanh toán' });
+                }, 800); 
+            });
+        }
+
+        function updateStatus(id, status) {
+            if (status === 'Hủy' && !confirm("Bạn chắc chắn muốn hủy đơn này?")) return;
+            firebase.database().ref('orders/' + id).update({ status: status });
+        }
+
+        function exportExcel() {
+            firebase.database().ref('orders').once('value', s => {
+                const data = s.val();
+                if (!data) return alert("Không có dữ liệu!");
+                const list = Object.values(data).map(o => ({
+                    "Ngày": o.date, "Khách": o.customer, "Bàn": o.location, "Tiền": o.total, "Trạng thái": o.status || "Mới"
+                }));
+                const ws = XLSX.utils.json_to_sheet(list);
+                const wb = XLSX.utils.book_new();
+                XLSX.utils.book_append_sheet(wb, ws, "Doanh Thu");
+                XLSX.writeFile(wb, "DoanhThu_Cattuong.xlsx");
+            });
+        }
+    </script>
+</body>
+</html>
